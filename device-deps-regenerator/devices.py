@@ -5,6 +5,7 @@ with open('out.json') as f:
 
 devices = {}
 suffixes = {}
+blacklist = ['sepolicy', 'devicesettings', 'common', 'atv']
 
 def simplify_reverse_deps(repo, device):
     # repo['branch'] = cm-14.1 or cm-14.1-caf or cm-14.1-sony
@@ -22,14 +23,14 @@ def simplify_reverse_deps(repo, device):
     return res
 
 for repo in mapping:
-    if 'device' in repo and 'common' not in repo:
-        codename = repo.split('_', maxsplit=3)[-1]
-        if codename in devices:
-            print("warning: dupe: %s"%codename)
+    if 'device' not in repo or any(x in repo for x in blacklist):
+        continue
+    codename = repo.split('_', maxsplit=3)[-1]
+    if codename in devices:
+        print("warning: dupe: %s"%codename)
+    devices[codename] = sorted(list(set(simplify_reverse_deps({'repo': repo}, codename))))
 
-        devices[codename] = sorted(list(set(simplify_reverse_deps({'repo': repo}, codename))))
-
-with open('devices.json', 'w') as f:
+with open('device_deps.json', 'w') as f:
     out = {'devices': devices, 'suffixes': suffixes}
     out = devices
     json.dump(out, f, indent=4, sort_keys=True)

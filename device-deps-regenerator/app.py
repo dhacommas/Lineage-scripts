@@ -1,3 +1,4 @@
+import argparse
 import concurrent.futures
 import github
 import json
@@ -5,6 +6,10 @@ import traceback
 
 from github import Github
 from base64 import b64decode
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-j', '--jobs', type=int, help='Max number of workers to use. Default is none')
+args = parser.parse_args()
 
 with open('token') as f:
     g = Github(f.readline().strip(), per_page=200)
@@ -15,7 +20,7 @@ print(g.rate_limiting_resettime)
 org = g.get_organization('LineageOS')
 
 # supported branches, newest to oldest
-CUR_BRANCHES = ['lineage-15.1', 'cm-14.1']
+CUR_BRANCHES = ['lineage-17.1', 'lineage-16.0']
 
 def get_cm_dependencies(repo):
     branch = None
@@ -65,8 +70,7 @@ n = 1
 dependencies = {}
 other_repos = set()
 
-
-with concurrent.futures.ThreadPoolExecutor() as executor:
+with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
     for repo in g.get_organization('LineageOS').get_repos():
         if '_device_' not in repo.name:
             continue
