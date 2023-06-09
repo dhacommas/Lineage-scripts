@@ -2,11 +2,15 @@
 
 set -e
 
-chromium_version="81.0.4044.117"
-chromium_code="4044117"
+chromium_version="114.0.5735.58"
+chromium_code="5735058"
 clean=0
 gsync=0
 supported_archs=(arm arm64 x86 x64)
+
+lineage_github=https://github.com/LineageOS
+lineage_gitlab=https://gitlab.com/LineageOS/android
+webview_proj_base=android_external_chromium-webview
 
 usage() {
     echo "Usage:"
@@ -23,6 +27,17 @@ usage() {
     echo "    build_webview -c -r $chromium_version:$chromium_code"
     echo
     exit 1
+}
+
+clone_proj() {
+    depth=""
+    if [ "$#" -eq 3 ]; then
+        depth="--depth $3"
+    fi
+
+    if [ ! -d "$2" ]; then
+        git clone $1 $2 $depth
+    fi
 }
 
 build() {
@@ -43,17 +58,30 @@ build() {
     gn gen "out/$1" --args="$build_args"
     ninja -C out/$1 system_webview_apk
     if [ "$?" -eq 0 ]; then
-        [ "$1" '==' "x64" ] && android_arch="x86_64" || android_arch=$1
-        cp out/$1/apks/SystemWebView.apk ../android_external_chromium-webview/prebuilt/$android_arch/webview.apk
+        case $1 in
+            x64)
+                android_arch="x86_64"
+                lineage_git=$lineage_gitlab
+                ;;
+            *)
+                android_arch=$1
+                lineage_git=$lineage_github
+                ;;
+        esac
+
+        clone_proj ${lineage_git}/${webview_proj_base}_prebuilt_${android_arch}.git \
+            ../${webview_proj_base}/prebuilt/${android_arch} 1
+
+        cp out/$1/apks/SystemWebView.apk ../$webview_proj_base/prebuilt/$android_arch/webview.apk
     fi
 }
 
 while getopts ":a:chr:s" opt; do
     case $opt in
         a) for arch in ${supported_archs[@]}; do
-               [ "$OPTARG" '==' "$arch" ] && build_arch="$OPTARG" || ((arch_try++))
+               [ "$OPTARG" '==' "$arch" ] && build_arch="$OPTARG"
            done
-           if [ $arch_try -eq ${#supported_archs[@]} ]; then
+           if [ -z "$build_arch" ]; then
                echo "Unsupported ARCH: $OPTARG"
                echo "Supported ARCHs: ${supported_archs[@]}"
                exit 1
@@ -62,8 +90,8 @@ while getopts ":a:chr:s" opt; do
         c) clean=1 ;;
         h) usage ;;
         r) version=(${OPTARG//:/ })
-           chromium_version=$version[1]
-           chromium_code=$version[2]
+           chromium_version=${version[0]}
+           chromium_code=${version[1]}
            ;;
         s) gsync=1 ;;
         :)
@@ -80,10 +108,9 @@ while getopts ":a:chr:s" opt; do
 done
 shift $((OPTIND-1))
 
-# Download android_external_chromium-webview
-if [ ! -d android_external_chromium-webview ]; then
-    git clone https://github.com/LineageOS/android_external_chromium-webview.git --depth 1
-fi
+# Download webview patches
+clone_proj ${lineage_github}/${webview_proj_base}_patches.git \
+    ${webview_proj_base}/patches
 
 # Add depot_tools to PATH
 if [ ! -d depot_tools ]; then
@@ -96,6 +123,13 @@ if [ ! -d src ]; then
     yes | gclient sync -D -R -r $chromium_version
 fi
 
+# Apply our patches
+if [ $gsync -eq 1 ]; then
+    ( cd src
+      git am ../android_external_chromium-webview/patches/*.patch
+    )
+fi
+
 if [ $gsync -eq 1 ]; then
     find src -name index.lock -delete
     yes | gclient sync -R -r $chromium_version
@@ -104,16 +138,11 @@ cd src
 
 # Replace webview icon
 mkdir -p android_webview/nonembedded/java/res_icon/drawable-xxxhdpi
-cp chrome/android/java/res_chromium/mipmap-mdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-mdpi/icon_webview.png
-cp chrome/android/java/res_chromium/mipmap-hdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-hdpi/icon_webview.png
-cp chrome/android/java/res_chromium/mipmap-xhdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-xhdpi/icon_webview.png
-cp chrome/android/java/res_chromium/mipmap-xxhdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-xxhdpi/icon_webview.png
-cp chrome/android/java/res_chromium/mipmap-xxxhdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-xxxhdpi/icon_webview.png
-
-# Apply our patches
-if [ $gsync -eq 1 ]; then
-    git am ../android_external_chromium-webview/patches/*
-fi
+cp chrome/android/java/res_chromium_base/mipmap-mdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-mdpi/icon_webview.png
+cp chrome/android/java/res_chromium_base/mipmap-hdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-hdpi/icon_webview.png
+cp chrome/android/java/res_chromium_base/mipmap-xhdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-xhdpi/icon_webview.png
+cp chrome/android/java/res_chromium_base/mipmap-xxhdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-xxhdpi/icon_webview.png
+cp chrome/android/java/res_chromium_base/mipmap-xxxhdpi/app_icon.png android_webview/nonembedded/java/res_icon/drawable-xxxhdpi/icon_webview.png
 
 # Build args
 args='target_os="android"'
@@ -123,12 +152,16 @@ args+=' is_chrome_branded=false'
 args+=' use_official_google_api_keys=false'
 args+=' ffmpeg_branding="Chrome"'
 args+=' proprietary_codecs=true'
-args+=' enable_resource_whitelist_generation=false'
-args+=' enable_remoting=true'
+args+=' enable_resource_allowlist_generation=false'
+args+=' enable_remoting=false'
 args+=' is_component_build=false'
 args+=' symbol_level=0'
 args+=' enable_nacl=false'
-args+=' blink_symbol_level = 0'
+args+=' blink_symbol_level=0'
+args+=' webview_devui_show_icon=false'
+args+=' dfmify_dev_ui=false'
+args+=' enable_gvr_services=false'
+args+=' disable_fieldtrial_testing_config=true'
 args+=' android_default_version_name="'$chromium_version'"'
 
 # Setup environment

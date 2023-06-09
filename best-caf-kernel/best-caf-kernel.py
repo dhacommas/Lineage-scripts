@@ -30,6 +30,9 @@ def run_subprocess(cmd):
 def get_tags(tag_name):
     cmd = "git tag -l %s" % tag_name
     comm = run_subprocess(cmd)
+    if not str(comm[0]):
+        return 0
+
     return comm[0].strip("\n").split("\n")
 
 
@@ -66,6 +69,8 @@ def background(q, e, s):
             if e.is_set():
                 break
         else:
+            if tc is None:
+                tc = 0;
             if not s:
                 print("%s has %d lines changed" % (tn, tc))
             if best > tc:
